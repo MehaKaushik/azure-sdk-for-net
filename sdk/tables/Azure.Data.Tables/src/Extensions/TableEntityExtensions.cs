@@ -26,6 +26,12 @@ namespace Azure.Data.Tables
 
             foreach (var prop in properties)
             {
+                // Remove the ETag and Timestamp properties, as they do not need to be serialized
+                if (prop.Name == TableConstants.PropertyNames.ETag || prop.Name == TableConstants.PropertyNames.Timestamp)
+                {
+                    continue;
+                }
+
                 annotatedDictionary[prop.Name] = prop.GetValue(entity);
 
                 switch (annotatedDictionary[prop.Name])
@@ -49,6 +55,10 @@ namespace Azure.Data.Tables
                         break;
                     case DateTime _:
                         annotatedDictionary[prop.Name.ToOdataTypeString()] = TableConstants.Odata.EdmDateTime;
+                        break;
+                    case Enum enumValue:
+                        // serialize enum as string
+                        annotatedDictionary[prop.Name] = enumValue.ToString();
                         break;
                 }
             }

@@ -28,7 +28,7 @@ public class ConfigurationLiveTests: ClientTestBase
         InstrumentClient(
             new ConfigurationClient(
                 ..., 
-                Recording.InstrumentClientOptions(
+                InstrumentClientOptions(
                     new ConfigurationClientClientOptions())));
     }
 
@@ -62,14 +62,9 @@ To use the environment provided by the `New-TestResources.ps1`, create a class t
 ``` C#
 public class AppConfigurationTestEnvironment : TestEnvironment
 {
-    // Call the base constructor passing the service directory name
-    public AppConfigurationTestEnvironment() : base("appconfiguration")
-    {
-    }
-
     // Variables retrieved using GetRecordedVariable will be recorded in recorded tests
     // Argument is the output name in the test-resources.json
-    public string ConnectionString => GetRecordedVariable("APPCONFIGURATION_CONNECTION_STRING");
+    public string Endpoint => GetRecordedVariable("APPCONFIGURATION_ENDPOINT");
     // Variables retrieved using GetVariable will not be recorded but the method will throw if the variable is not set
     public string SystemAssignedVault => GetVariable("IDENTITYTEST_IMDSTEST_SYSTEMASSIGNEDVAULT");
     // Variables retrieved using GetOptionalVariable will not be recorded and the method will return null if variable is not set
@@ -78,6 +73,24 @@ public class AppConfigurationTestEnvironment : TestEnvironment
 ```
 
 **NOTE:** Make sure that variables containing secret values are not recorded or are sanitized.
+
+To sanitize variables use the `options` parameter of `GetRecordedVariable`:
+
+``` C#
+    // HasSecretConnectionStringParameter would ensure the right connection string parameter is sanitized before storing the record
+    public string ConnectionString => GetRecordedVariable("APPCONFIGURATION_CONNECTION_STRING", options => options.HasSecretConnectionStringParameter("secret"));
+    // IsSecret would ensure the entire value is sanitized before storage
+    public string Key => GetRecordedVariable("APPCONFIGURATION_KEY", options => options.IsSecret());
+```
+
+If the client expects a Base64 secret value use the `SanitizedValue` parameter to use a Base64 compatible replacement value:
+
+``` C#
+    // Connection string parameter would be replaced with Kg==
+    public string ConnectionString => GetRecordedVariable("APPCONFIGURATION_CONNECTION_STRING", options => options.HasSecretConnectionStringParameter("secret", SanitizedValue.Base64));
+    // Secret value would be replaced with Kg==
+    public string Key => GetRecordedVariable("APPCONFIGURATION_KEY", options => options.IsSecret(SanitizedValue.Base64));
+```
 
 You can now retrieve these values in tests:
 
@@ -122,7 +135,7 @@ If a test or sample uses `TokenCredential` to construct the client use `TestEnvi
             InstrumentClient(
                 new KeyClient(
                     new Uri(TestEnvironment.KeyVaultUrl),TestEnvironment.Credential,
-                    Recording.InstrumentClientOptions(
+                    InstrumentClientOptions(
                         new KeyClientOptions())));
         }
     }
@@ -133,7 +146,7 @@ If a test or sample uses `TokenCredential` to construct the client use `TestEnvi
 
 The test framework provides an ability to record HTTP requests and responses and replay them for offline test runs. This allows the full suite of tests to be run as part of PR validation without running live tests. In general, live tests are run as part of a separate internal pipeline that runs nightly.
 
-To use recorded test functionality inherit from `RecordedTestBase<T>` class and use `Recording.InstrumentClientOptions` method when creating the client instance. Pass the test environment class as a generic argument to `RecordedTestBase`.
+To use recorded test functionality inherit from `RecordedTestBase<T>` class and use `InstrumentClientOptions` method when creating the client instance. Pass the test environment class as a generic argument to `RecordedTestBase`.
 
 
 ``` C#
@@ -147,7 +160,7 @@ public class ConfigurationLiveTests: RecordedTestBase<AppConfigurationTestEnviro
         InstrumentClient(
             new ConfigurationClient(
                 ..., 
-                Recording.InstrumentClientOptions(
+                InstrumentClientOptions(
                     new ConfigurationClientClientOptions())));
     }
 
@@ -167,18 +180,32 @@ By default tests are run in playback mode. To change the mode use the `AZURE_TES
 
 In development scenarios where it's required to change mode quickly without restarting the Visual Studio use the two-parameter constructor of `RecordedTestBase` to change the mode:
 
+Recorded tests can be attributed with the `RecordedTestAttribute` in lieu of the standard `TestAttribute` to enable functionality to automatically re-record tests that fail due to recording session file mismatches.
+Tests that are auto-rerecorded will fail with the following error and succeed if re-run.
+
+```
+Error Message:
+   Test failed playback, but was successfully re-recorded (it should pass if re-run). Please copy updated recording to SessionFiles.
+```
+
 ``` C#
 public class ConfigurationLiveTests: RecordedTestBase<AppConfigurationTestEnvironment>
 {
     public ConfigurationLiveTests(bool isAsync) : base(isAsync, RecordedTestMode.Record)
     {
+        [RecordedTest]
+        public void MyTest()
+        {
+            //...
+        }
     }
 }
 ```
 
+
 ## Recording
 
-When tests are run in recording mode, session records are saved to `artifacts/bin/<ProjectName>/<TargetFramework>/SessionRecords` directory. You can copy recordings to the project directory manually or by executing `dotnet msbuild /t:UpdateSessionRecords` in the test project directory.
+When tests are run in recording mode, session records are saved to the project directory automatically in a folder named 'SessionRecords'.
 
 __NOTE:__ recordings are copied from `netcoreapp2.1` directory by default, make sure you are running the right target framework.
 
@@ -192,58 +219,29 @@ For example:
 ``` C#
     public class ConfigurationRecordedTestSanitizer : RecordedTestSanitizer
     {
-        public override string SanitizeVariable(string variableName, string environmentVariableValue) =>
-            variableName switch
-            {
-                "APPCONFIGURATION_CONNECTION_STRING" => SanitizeConnectionString(environmentVariableValue),
-                _ => base.SanitizeVariable(variableName, environmentVariableValue)
-            };
-
-        private static string SanitizeConnectionString(string connectionString)
+        public ConfigurationRecordedTestSanitizer()
         {
-            const string secretKey = "secret";
-            var parsed = ConnectionString.Parse(connectionString, allowEmptyValues: true);
+            // Add headers that might contain secrets
+            SanitizedHeaders.Add("My-Custom-Auth-Header");
+        }
 
-            // Configuration client expects secret to be base64 encoded so we can't use the placeholder
-            parsed.Replace(secretKey, string.Empty);
-            return parsed.ToString();
+        public override string SanitizeUri(string uri)
+        {
+            // sanitize url
         }
     }
 ```
-The above example also illustrates a common pattern where you need to sanitize the connection string, but you must ensure that the account key is base64 encoded or else the test will fail your connection string validation when run in Playback mode. In such cases, you need to override the default placeholder that is used to ensure the value is base64.
 
 Another sanitizer property that is available for sanitizing Json payloads is the `JsonPathSanitizers`. This property contains a list of [Json Path](https://www.newtonsoft.com/json/help/html/QueryJsonSelectToken.htm) format strings that will be validated against the body. If a match exists, the value will be sanitized.
 
 ```c#
     public class FormRecognizerRecordedTestSanitizer : RecordedTestSanitizer
     {
-        private const string SanitizedSasUri = "https://sanitized.blob.core.windows.net";
-
         public FormRecognizerRecordedTestSanitizer()
             : base()
         {
             JsonPathSanitizers.Add("$..accessToken");
             JsonPathSanitizers.Add("$..source");
-        }
-
-        public override void SanitizeHeaders(IDictionary<string, string[]> headers)
-        {
-            if (headers.ContainsKey(Constants.AuthorizationHeader))
-            {
-                headers[Constants.AuthorizationHeader] = new[] { SanitizeValue };
-            }
-
-            base.SanitizeHeaders(headers);
-        }
-
-        public override string SanitizeVariable(string variableName, string environmentVariableValue)
-        {
-            return variableName switch
-            {
-                FormRecognizerTestEnvironment.ApiKeyEnvironmentVariableName => SanitizeValue,
-                FormRecognizerTestEnvironment.BlobContainerSasUrlEnvironmentVariableName => SanitizedSasUri,
-                _ => base.SanitizeVariable(variableName, environmentVariableValue)
-            };
         }
     }
 ```
@@ -258,7 +256,7 @@ When tests are run in replay mode, HTTP method, Uri and headers are used to matc
     {
         public ConfigurationRecordMatcher(RecordedTestSanitizer sanitizer) : base(sanitizer)
         {
-            ExcludeHeaders.Add("Sync-Token");
+            IgnoredHeaders.Add("Sync-Token");
         }
     }
 
@@ -380,3 +378,57 @@ For example:
 
 ## Management libraries
 Testing of management libraries uses the Test Framework and should generally be very similar to tests that you write for data plane libraries. There is an intermediate test class that you will likely want to derive from that lives within the management code base - [ManagementRecordedTestBase](https://github.com/Azure/azure-sdk-for-net/blob/babee31b3151e4512ac5a77a55c426c136335fbb/common/ManagementTestShared/ManagementRecordedTestBase.cs). To see examples of Track 2 Management tests using the Test Framework, take a look at the [Storage tests](https://github.com/Azure/azure-sdk-for-net/tree/master/sdk/storage/Azure.ResourceManager.Storage/tests/Tests).
+
+## Recording tests on CI
+
+Test framework provides an ability to re-record tests remotely using an Azure DevOps test pipeline. To re-record tests you need to have an open GitHub pull request.
+
+To start recording invoke the `Start-DevOpsRecordings.ps1` script passing the PR number and sdk directories to re-record:
+
+```powershell
+> .\eng\scripts\Start-DevOpsRecordings.ps1 14153 storage iot tables
+```
+
+The `Start-DevOpsRecordings.ps1` would cancel all active recording runs unless `-NoCancel` switch is used.
+
+After runs finish an artifact with recordings will be published.
+
+To download and unpack all artifacts use the `Download-DevOpsRecordings.ps1` script passing the PR number.
+
+```powershell
+> .\eng\scripts\Download-DevOpsRecordings.ps1 14153
+```
+
+The `Download-DevOpsRecordings.ps1` would wait for active runs to finish before retrieving artifacts unless `-NoWait` switch is used.
+
+**NOTE:** these scripts require being signed in with Azure CLI (https://docs.microsoft.com/cli/azure/authenticate-azure-cli?view=azure-cli-latest) and access to the internal DevOps project (https://dev.azure.com/azure-sdk/internal/) 
+
+## Note on private/non-virtual fields in your clients (such as _clientDiagnostics) and InternalsVisibleTo
+
+Some bindings require code on the customized side to access fields that are generated. For example:
+
+```csharp
+    // Generated\SparkSessionClient.cs
+    public partial class SparkSessionClient
+    {
+        private readonly ClientDiagnostics _clientDiagnostics;
+        ...
+    }
+```
+
+```csharp
+    // Customization\SparkSessionClient.cs
+    internal virtual Response<SparkSession> GetSparkSession(int sessionId, bool? detailed = null, CancellationToken cancellationToken = default)
+    {
+        using var scope = _clientDiagnostics.CreateScope("SparkSessionClient.GetSparkSession");
+        ...
+    }
+```
+
+For this to work with tests, your test class must have an `InternalsVisisbleTo` in your `AssemblyInfo.cs`:
+
+```csharp
+[assembly: InternalsVisibleTo("DynamicProxyGenAssembly2, PublicKey=0024000004800000940000000602000000240000525341310004000001000100c547cac37abd99c8db225ef2f6c8a3602f3b3606cc9891605d02baa56104f4cfc0734aa39b93bf7852f7d9266654753cc297e7d2edfe0bac1cdcf9f717241550e0a7b191195b7667bb4f64bcb8e2121380fd1d9d46ad2d92d2d15605093924cceaf74c4861eff62abf69b9291ed0a340e113be11e6a7d3113e92484cf7045cc7")]
+```
+
+If this is neglected, _clientDiagnostics will be null at test runtime.

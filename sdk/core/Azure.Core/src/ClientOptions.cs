@@ -79,13 +79,11 @@ namespace Azure.Core
 
         /// <inheritdoc />
         [EditorBrowsable(EditorBrowsableState.Never)]
-        public override string ToString() => base.ToString();
-
+        public override string? ToString() => base.ToString();
 
         private static HttpPipelineTransport GetDefaultTransport()
         {
-// TODO: Uncomment after release
-#if false && NETFRAMEWORK
+#if NETFRAMEWORK
             bool GetSwitchValue(string switchName, string envVariable)
             {
                 if (!AppContext.TryGetSwitch(switchName, out bool ret))
@@ -108,6 +106,5 @@ namespace Azure.Core
 #endif
             return HttpClientTransport.Shared;
         }
-
     }
 }

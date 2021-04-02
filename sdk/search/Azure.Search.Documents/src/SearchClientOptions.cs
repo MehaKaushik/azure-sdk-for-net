@@ -5,9 +5,7 @@ using System;
 using System.Diagnostics;
 using Azure.Core;
 using Azure.Core.Pipeline;
-#if EXPERIMENTAL_SERIALIZER
 using Azure.Core.Serialization;
-#endif
 
 #pragma warning disable SA1402 // File may only contain a single type
 
@@ -22,7 +20,8 @@ namespace Azure.Search.Documents
         /// <summary>
         /// The versions of Azure Cognitive Search supported by this client
         /// library.  For more, see
-        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions" />.
+        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions">
+        /// API versions in Azure Cognitive Search</see>.
         /// </summary>
         public enum ServiceVersion
         {
@@ -50,11 +49,11 @@ namespace Azure.Search.Documents
         /// <summary>
         /// Gets the <see cref="ServiceVersion"/> of the service API used when
         /// making requests.  For more, see
-        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions" />.
+        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions">
+        /// API versions in Azure Cognitive Search</see>.
         /// </summary>
         public ServiceVersion Version { get; }
 
-#if EXPERIMENTAL_SERIALIZER
         /// <summary>
         /// Gets or sets an <see cref="ObjectSerializer"/> that can be used to
         /// customize the serialization of strongly typed models.  The
@@ -62,7 +61,6 @@ namespace Azure.Search.Documents
         /// will be used if no value is provided.
         /// </summary>
         public ObjectSerializer Serializer { get; set; }
-#endif
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SearchClientOptions"/>
@@ -71,7 +69,8 @@ namespace Azure.Search.Documents
         /// <param name="version">
         /// An optional <see cref="ServiceVersion"/> to specify the version of
         /// the REST API to use.  For more, see
-        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions" />.
+        /// <see href="https://docs.microsoft.com/azure/search/search-api-versions">
+        /// API versions in Azure Cognitive Search</see>.
         ///
         /// If not provided, the <paramref name="version"/> will default to the
         /// latest supported by this client library.  It is recommended that
